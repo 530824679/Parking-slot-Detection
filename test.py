@@ -61,6 +61,6 @@ def test_pb(image_path, weights_path):
 
 
 if __name__ == "__main__":
-    image_dir = '/home/chenwei/HDD/Project/2D_ObjectDetect/test'
-    weights_path = '/home/chenwei/HDD/Project/2D_ObjectDetect/checkpoints/model.ckpt'
+    image_dir = '/home/chenwei/HDD/Project/Parking-slot-Detection/test'
+    weights_path = '/home/chenwei/HDD/Project/Parking-slot-Detection/checkpoints/odet_train_mloss=30.6506.ckpt-258'
     test_pb(image_dir, weights_path)

@@ -12,7 +12,7 @@
 import os
 
 path_params = {
-    'data_path': "/home/chenwei/HDD/Project/Parking-slot-Detection/datasets/voc",
+    'data_path': "/home/chenwei/HDD/Project/Parking-slot-Detection/datasets/voc_bosh_clyinder",
     'class_file': '/home/chenwei/HDD/Project/Parking-slot-Detection/data/classes.txt',
     'train_file': '/home/chenwei/HDD/Project/Parking-slot-Detection/data/train.txt',
     'anchor_file': '/home/chenwei/HDD/Project/Parking-slot-Detection/data/anchors.txt',
@@ -32,23 +32,25 @@ data_params = {
 }
 
 model_params = {
-    'input_height': 480,
+    'input_height': 640,
     'input_width': 640,
     'channel': 3,
     'classes': 3,
+    'depth': 1.0,       # [0.33, 0.67, 1.0, 1.33]
+    'width': 1.0,       # [0.50, 0.75, 1.0, 1.25]
     'strides': [8, 16, 32],
     'anchor_per_scale': 3,
     'label_smoothing': 0.01,
-    'iou_threshold': 0.5,
+    'iou_threshold': 0.3,
     'warm_up_epoch': 3,
-    'anchors': [27,22, 20,36, 42,32, 34,56, 63,49, 60,94, 104,75, 142,139, 290,246]
+    'anchors': [8., 9., 16., 24., 28., 58., 41., 25., 58., 125., 71., 52., 129., 97., 163., 218., 384.,347.]
 }
 
 solver_params = {
-    'total_epoches': 20000,
+    'total_epoches': 8000,
     'batch_size': 4,
     'warmup_epoches': 10,
-    'learning_rate': 0.0001,
+    'learning_rate': 0.001,
     'decay_steps': 500,            # 衰变步数
     'decay_rate': 0.95,             # 衰变率
     'momentum': 0.9,

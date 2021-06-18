@@ -9,91 +9,52 @@
 
 import tensorflow as tf
 
-def bn(input):
-    with tf.variable_scope('bn'):
-        gamma=tf.Variable(tf.random_normal(shape=[input.shape[-1].value]), name='weight',trainable=True)
-        beta = tf.Variable(tf.random_normal(shape=[input.shape[-1].value]), name='bias',trainable=True)
-        mean = tf.Variable(tf.random_normal(shape=[input.shape[-1].value]), name='running_mean',trainable=True)
-        var = tf.Variable(tf.random_normal(shape=[input.shape[-1].value]), name='running_var',trainable=True)
+initializer = tf.random_normal_initializer(stddev=0.01)
+l2 = tf.keras.regularizers.l2(4e-5)
 
-        out = tf.nn.batch_normalization(input, mean, var, beta, gamma,variance_epsilon=0.001)
-        return out
+def conv(x, filters, kernel=1, stride=1, add_bias=False):
+    if stride == 2:
+        x = tf.keras.layers.ZeroPadding2D(((1, 0), (1, 0)))(x)
+        padding = 'valid'
+    else:
+        padding = 'same'
 
-def conv(input, out_channels, ksize, stride, name='conv', add_bias=False):
-    filter = tf.Variable(tf.random_normal(shape=[ksize, ksize, input.shape[-1].value, out_channels]), name=name+'/weight', trainable=True)
+    x = tf.keras.layers.Conv2D(filters, kernel, stride, padding, use_bias=add_bias, kernel_initializer=initializer, kernel_regularizer=l2)(x)
+    x = tf.keras.layers.BatchNormalization(momentum=0.03)(x)
+    x = tf.keras.layers.Activation(tf.nn.swish)(x)
 
-    if ksize > 1:
-        pad_h, pad_w = ksize//2, ksize//2
-        paddings = tf.constant([[0, 0], [pad_h, pad_h], [pad_w, pad_w], [0, 0]])
-        input = tf.pad(input, paddings, 'CONSTANT')
-    net = tf.nn.conv2d(input, filter, [1,stride, stride, 1], padding="VALID")
+    return x
 
-    if add_bias:
-        bias = tf.Variable(tf.random_normal(shape=[out_channels]), name=name + '/bias',trainable=True)
-        net = tf.nn.bias_add(net,bias)
-    return net
+def bottleneck(x, filters, shortcut=True):
+    inputs = x
+    x = conv(x, filters, 1)
+    x = conv(x, filters, 3)
 
-def convBnLeakly(input, out_channels, ksize, stride, name):
+    if shortcut:
+        x = inputs + x
+    return x
+
+def csp(x, filters, n, shortcut=True):
+    y = conv(x, filters // 2)
+    for _ in range(n):
+        y = bottleneck(y, filters // 2, shortcut)
+
+    x = conv(x, filters // 2)
+    x = tf.keras.layers.concatenate([x, y])
+
+    x = conv(x, filters)
+    return x
+
+def spp(x, filters, k1, k2, k3, width, name):
+    c_ = filters // 2
     with tf.variable_scope(name):
-        net = conv(input, out_channels, ksize, stride)
-        net = bn(net)
-        # swish
-        # net=tf.nn.sigmoid(net)*net
+        x = conv(x, int(round(width * c_)), 1, 1)
 
-        # v2.0
-        # net=tf.nn.leaky_relu(net,alpha=0.1)
+        net1 = tf.nn.max_pool(x, [1, k1, k1, 1], [1, 1, 1, 1], padding="SAME")
+        net2 = tf.nn.max_pool(x, [1, k2, k2, 1], [1, 1, 1, 1], padding="SAME")
+        net3 = tf.nn.max_pool(x, [1, k3, k3, 1], [1, 1, 1, 1], padding="SAME")
 
-        # v3.0
-        net = net * tf.nn.relu6(net + 3.0) / 6.0
+        x = tf.keras.layers.concatenate([x, net1, net2, net3])
+        x = conv(x, int(round(width * 1024)), 1, 1)
 
-        return net
-
-def focus(input, out_channels, ksize, name):
-    s1 = input[:, ::2, ::2, :]
-    s2 = input[:, 1::2, ::2, :]
-    s3 = input[:, ::2, 1::2, :]
-    s4 = input[:, 1::2, 1::2, :]
-
-    net = tf.concat([s1, s2, s3, s4], axis=-1)
-    net = convBnLeakly(net, out_channels, ksize, 1, name+'/conv')
-    return net
-
-def bottleneck(input, c1, c2, shortcut, e, name):
-    with tf.variable_scope(name):
-        net = convBnLeakly(input,int(c2 * e), 1, 1, 'cv1')
-        net = convBnLeakly(net, c2, 3, 1, 'cv2')
-
-        if (shortcut and c1==c2):
-            net += input
-        return net
-
-def bottleneckCSP(input, c1, c2, n, shortcut, e, name):
-    c_ = int(c2 * e)
-    with tf.variable_scope(name):
-        net1 = convBnLeakly(input, c_, 1, 1, 'cv1')
-        for i in range(n):
-            net1 = bottleneck(net1, c_, c_, shortcut, 1.0, name='m/%d'%i)
-
-        net1 = conv(net1, c_, 1, 1, name='cv3')
-        net2 = conv(input, c_, 1, 1, 'cv2')
-
-        net = tf.concat((net1, net2), -1)
-        net = bn(net)
-        net = tf.nn.leaky_relu(net, alpha=0.1)
-
-        net = convBnLeakly(net, c2, 1, 1, 'cv4')
-        return net
-
-def spp(input, c1, c2, k1, k2, k3, name):
-    c_ = c1//2
-    with tf.variable_scope(name):
-        net = convBnLeakly(input, c_, 1, 1, 'cv1')
-
-        net1 = tf.nn.max_pool(net, ksize=[1, k1, k1, 1], strides=[1, 1, 1, 1], padding="SAME")
-        net2 = tf.nn.max_pool(net, ksize=[1, k2, k2, 1], strides=[1, 1, 1, 1], padding="SAME")
-        net3 = tf.nn.max_pool(net, ksize=[1, k3, k3, 1], strides=[1, 1, 1, 1], padding="SAME")
-
-        net = tf.concat((net, net1, net2, net3), -1)
-        net = convBnLeakly(net, c2, 1, 1, 'cv2')
-
-        return net
+        return x

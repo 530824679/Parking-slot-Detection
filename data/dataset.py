@@ -63,7 +63,6 @@ class Dataset(object):
 
             # 将类别由字符串转换为对应的int数
             class_index = self.cls_type_to_id(object.find('name').text.strip())
-            print("class index is %d\n", class_index)
 
             box = [xmin, ymin, xmax, ymax, class_index]
             bboxes.append(box)
@@ -116,11 +115,11 @@ class Dataset(object):
         anchor_mask = [[6, 7, 8], [3, 4, 5], [0, 1, 2]]
         feature_map_sizes = [input_shape // 32, input_shape // 16, input_shape // 8]
 
-        y_true_17 = np.zeros(shape=[feature_map_sizes[0][0], feature_map_sizes[0][1], 3, 5 + num_classes], dtype=np.float32)
-        y_true_20 = np.zeros(shape=[feature_map_sizes[1][0], feature_map_sizes[1][1], 3, 5 + num_classes], dtype=np.float32)
-        y_true_23 = np.zeros(shape=[feature_map_sizes[2][0], feature_map_sizes[2][1], 3, 5 + num_classes], dtype=np.float32)
+        y_true_1 = np.zeros(shape=[feature_map_sizes[0][0], feature_map_sizes[0][1], 3, 5 + num_classes], dtype=np.float32)
+        y_true_2 = np.zeros(shape=[feature_map_sizes[1][0], feature_map_sizes[1][1], 3, 5 + num_classes], dtype=np.float32)
+        y_true_3 = np.zeros(shape=[feature_map_sizes[2][0], feature_map_sizes[2][1], 3, 5 + num_classes], dtype=np.float32)
 
-        y_true = [y_true_17, y_true_20, y_true_23]
+        y_true = [y_true_1, y_true_2, y_true_3]
 
         # convert boxes from (min_x, min_y, max_x, max_y) to (x, y, w, h)
         boxes_xy = (labels[:, 0:2] + labels[:, 2:4]) / 2
@@ -168,4 +167,4 @@ class Dataset(object):
             y_true[feature_map_group][j, i, k, 4] = 1
             y_true[feature_map_group][j, i, k, 5 + c] = 1
 
-        return y_true_17, y_true_20, y_true_23
+        return y_true_1, y_true_2, y_true_3

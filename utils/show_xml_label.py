@@ -50,8 +50,29 @@ def show_and_save(path):
         xml_path = os.path.join(xml_path1, i.replace('.png', '.xml'))
         save_viz_image(image_path, xml_path, save_path)
 
+def write_txt(root_path):
+    src_ImageSets_dir = os.path.join(root_path, "ImageSets/Main")
+    src_JPEGImages_dir = os.path.join(root_path, "JPEGImages")
 
+    train_list = []
+    filelist = os.listdir(src_JPEGImages_dir)
+    for i in filelist:
+        try:
+            name = i.split('png')[0]
+            # print(name)
+            train_list.append(name[:-1])
+
+        except:
+            print(i + 'wrong')
+            continue
+
+    with open(os.path.join(src_ImageSets_dir, 'train.txt'), 'w') as json_file:
+        for text in train_list:
+            # print(text)
+            json_file.write(text + '\n')
 
 if __name__ == '__main__':
-    path = '/home/chenwei/HDD/Project/Parking-slot-Detection/datasets/voc'
+    # write_txt("/home/chenwei/HDD/Project/Parking-slot-Detection/datasets/voc_bosh_clyinder")
+
+    path = '/home/chenwei/HDD/Project/Parking-slot-Detection/datasets/voc_bosh_clyinder'
     show_and_save(path)

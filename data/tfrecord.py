@@ -113,7 +113,7 @@ class TFRecord(object):
 
         return tf_image, y_true_40, y_true_80, y_true_160
 
-    def create_dataset(self, filenames, batch_num, batch_size=1, is_shuffle=False):
+    def create_dataset(self, filenames, batch_num, batch_size=1, is_shuffle=True):
         """
         :param filenames: record file names
         :param batch_size: batch size
@@ -133,7 +133,7 @@ class TFRecord(object):
 
 if __name__ == '__main__':
     tfrecord = TFRecord()
-    #tfrecord.create_tfrecord()
+    tfrecord.create_tfrecord()
 
     # import cv2
     # import matplotlib.pyplot as plt

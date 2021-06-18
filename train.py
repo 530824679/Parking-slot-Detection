@@ -15,7 +15,6 @@ import tensorflow as tf
 import glog as log
 
 from cfg.config import path_params, model_params, solver_params
-from model.loss import Loss
 from model.network import Network
 from data import dataset, tfrecord
 from utils.data_utils import *
@@ -26,6 +25,19 @@ def config_warmup_lr(global_step, warmup_steps, name):
         factor = tf.math.pow(solver_params['init_learning_rate'] / warmup_init_learning_rate, 1.0 / warmup_steps)
         warmup_lr = warmup_init_learning_rate * tf.math.pow(factor, global_step)
     return warmup_lr
+
+def config_cosine_lr(steps, batch_size, num_epochs, name):
+    with tf.variable_scope(name_or_scope=name):
+        lr_init = 0.008 * batch_size / 64
+        warmup_init = 0.0008
+        warmup_step = steps
+        decay_steps = tf.cast((num_epochs - 1) * warmup_step, tf.float32)
+
+        linear_warmup = tf.cast(steps, dtype=tf.float32) / warmup_step * (lr_init - warmup_init)
+        cosine_lr = 0.5 * lr_init * (1 + tf.cos(math.pi * tf.cast(steps, tf.float32) / decay_steps))
+        lr = tf.where(steps < warmup_step, warmup_init + linear_warmup, cosine_lr)
+
+    return lr
 
 def config_optimizer(optimizer_name, lr_init, momentum=0.99):
     log.info("message:配置优化器:'" + str(optimizer_name) + "'")
@@ -39,18 +51,6 @@ def config_optimizer(optimizer_name, lr_init, momentum=0.99):
         log.error("error:不支持的优化器类型:'" + str(optimizer_name) + "'")
         raise ValueError(str(optimizer_name) + ":不支持的优化器类型")
 
-def config_learning_rate(lr_type, lr_init, global_step=0):
-    log.info("message:配置学习率:'" + str(lr_type) + "', 初始学习率:" + str(lr_init))
-    if lr_type == 'piecewise':
-        lr = tf.train.piecewise_constant(global_step, config.piecewise_boundaries, config.piecewise_values)
-    elif lr_type == 'exponential':
-        lr = tf.train.exponential_decay(learning_rate=lr_init, global_step=global_step, decay_steps=10, decay_rate=0.99, staircase=True)
-    elif lr_type == 'constant':
-        lr = lr_init
-    else:
-        log.error("error:不支持的学习率类型:'" + str(lr_type) + "'")
-        raise ValueError(str(lr_type) + ":不支持的学习率类型")
-
 def compute_curr_epoch(global_step, batch_size, image_num):
     epoch = global_step * batch_size / image_num
     return tf.cast(epoch, tf.int32)
@@ -59,7 +59,7 @@ def train():
     start_step = 0
     input_height = model_params['input_height']
     input_width = model_params['input_width']
-    total_epoches = solver_params['total_epoches']
+    num_epochs = solver_params['total_epoches']
     batch_size = solver_params['batch_size']
     checkpoint_dir = path_params['checkpoints_dir']
     tfrecord_dir = path_params['tfrecord_dir']
@@ -93,34 +93,35 @@ def train():
 
     # 创建训练和验证数据迭代器
     iterator = dataset.make_one_shot_iterator()
-    inputs, y_true_40, y_true_80, y_true_160 = iterator.get_next()
+    inputs, y_true_1, y_true_2, y_true_3 = iterator.get_next()
 
     inputs.set_shape([None, input_height, input_width, 3])
-    y_true_40.set_shape([None, 15, 20, 3, 5 + class_num])
-    y_true_80.set_shape([None, 30, 40, 3, 5 + class_num])
-    y_true_160.set_shape([None, 60, 80, 3, 5 + class_num])
-    y_true = [y_true_40, y_true_80, y_true_160]
+    y_true_1.set_shape([None, 20, 20, 3, 5 + class_num])
+    y_true_2.set_shape([None, 40, 40, 3, 5 + class_num])
+    y_true_3.set_shape([None, 80, 80, 3, 5 + class_num])
+    y_true = [y_true_1, y_true_2, y_true_3]
 
     # 构建网络计算损失
-    with tf.variable_scope('yolov5'):
+    with tf.variable_scope('ODET'):
         model = Network(is_train=True)
         logits = model.forward(inputs)
 
     # 计算损失
     loss_op = model.calc_loss(logits, y_true)
     l2_loss = tf.losses.get_regularization_loss()
-    total_loss = loss_op[0] + loss_op[1] + loss_op[2] + l2_loss
+    total_loss = loss_op[0] + loss_op[1] + loss_op[2] + loss_op[3] + l2_loss
 
     # define training op
     global_step = tf.Variable(float(0), dtype=tf.float64, trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
-    learning_rate = tf.train.exponential_decay(solver_params['learning_rate'], global_step, solver_params['decay_steps'], solver_params['decay_rate'], staircase=True)
-    optimizer = tf.train.AdamOptimizer(learning_rate)
+    learning_rate = config_cosine_lr(batch_num, batch_size, num_epochs, 'learning_lr')
+    #optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=0.937)
+    optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=0.99)
 
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
         #train_op = optimizer.minimize(total_loss, global_step=global_step)
         gvs = optimizer.compute_gradients(total_loss)
-        clip_grad_var = [gv if gv[0] is None else [tf.clip_by_norm(gv[0], 100.), gv[1]] for gv in gvs]
+        clip_grad_var = [gv if gv[0] is None else [tf.clip_by_norm(gv[0], 5.), gv[1]] for gv in gvs]
         train_op = optimizer.apply_gradients(clip_grad_var, global_step=global_step)
 
     # 模型保存
@@ -130,10 +131,11 @@ def train():
 
     # 配置tensorboard
     tf.summary.scalar('learn_rate', learning_rate)
-    tf.summary.scalar("iou_loss", loss_op[1])
+    tf.summary.scalar("xy_loss", loss_op[0])
+    tf.summary.scalar("wh_loss", loss_op[1])
     tf.summary.scalar("conf_loss", loss_op[2])
     tf.summary.scalar("class_loss", loss_op[3])
-    tf.summary.scalar('total_loss', loss_op[0])
+    tf.summary.scalar('total_loss', total_loss)
 
     summary_op = tf.summary.merge_all()
     summary_writer = tf.summary.FileWriter(logs_path, graph=tf.get_default_graph(), flush_secs=60)
@@ -163,22 +165,23 @@ def train():
             print('=> Now it starts to train from scratch ...')
 
         print('\n----------- start to train -----------\n')
-        for epoch in range(start_step + 1, total_epoches):
-            train_epoch_loss, train_epoch_iou_loss, train_epoch_confs_loss, train_epoch_class_loss = [], [], [], []
+        for epoch in range(start_step + 1, num_epochs):
+            train_epoch_loss, train_epoch_xy_loss, train_epoch_wh_loss, train_epoch_confs_loss, train_epoch_class_loss = [], [], [], [], []
             for index in tqdm(range(batch_num)):
-                _, summary_, loss_, iou_loss_, confs_loss_, class_loss_, global_step_, lr = sess.run(
-                    [train_op, summary_op, total_loss, loss_op[1], loss_op[2], loss_op[3], global_step, learning_rate])
+                _, summary_, loss_, xy_loss_, wh_loss_, confs_loss_, class_loss_, global_step_, lr = sess.run(
+                    [train_op, summary_op, total_loss, loss_op[0], loss_op[1], loss_op[2], loss_op[3], global_step, learning_rate])
 
                 train_epoch_loss.append(loss_)
-                train_epoch_iou_loss.append(iou_loss_)
+                train_epoch_xy_loss.append(xy_loss_)
+                train_epoch_wh_loss.append(wh_loss_)
                 train_epoch_confs_loss.append(confs_loss_)
                 train_epoch_class_loss.append(class_loss_)
 
                 summary_writer.add_summary(summary_, global_step_)
 
-            train_epoch_loss, train_epoch_iou_loss, train_epoch_confs_loss, train_epoch_class_loss = np.mean(train_epoch_loss), np.mean(train_epoch_iou_loss), np.mean(train_epoch_confs_loss), np.mean(train_epoch_class_loss)
-            print("Epoch: {}, global_step: {}, lr: {:.8f}, total_loss: {:.3f}, iou_loss: {:.3f},confs_loss: {:.3f}, class_loss: {:.3f}".format(epoch, global_step_, lr, train_epoch_loss, train_epoch_iou_loss, train_epoch_confs_loss, train_epoch_class_loss))
-            snapshot_model_name = 'tusimple_train_miou={:.4f}.ckpt'.format(train_epoch_iou_loss)
+            train_epoch_loss, train_epoch_xy_loss, train_epoch_wh_loss, train_epoch_confs_loss, train_epoch_class_loss = np.mean(train_epoch_loss), np.mean(train_epoch_xy_loss), np.mean(train_epoch_wh_loss), np.mean(train_epoch_confs_loss), np.mean(train_epoch_class_loss)
+            print("Epoch: {}, global_step: {}, lr: {:.8f}, total_loss: {:.3f}, xy_loss: {:.3f}, wh_loss: {:.3f}, confs_loss: {:.3f}, class_loss: {:.3f}".format(epoch, global_step_, lr, train_epoch_loss, train_epoch_xy_loss, train_epoch_wh_loss, train_epoch_confs_loss, train_epoch_class_loss))
+            snapshot_model_name = 'odet_train_mloss={:.4f}.ckpt'.format(train_epoch_loss)
             saver.save(sess, os.path.join(checkpoint_dir, snapshot_model_name), global_step=epoch)
 
         sess.close()

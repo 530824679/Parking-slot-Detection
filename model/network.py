@@ -20,6 +20,8 @@ class Network(object):
         self.input_height = model_params['input_height']
         self.input_width = model_params['input_width']
         self.input_size = np.array([self.input_height, self.input_width])
+        self.model_depth = model_params['depth']
+        self.model_width = model_params['width']
         self.anchors = read_anchors(path_params['anchor_file'])
         self.anchor_per_sacle = model_params['anchor_per_scale']
         self.classes = read_class_names(path_params['class_file'])
@@ -44,50 +46,57 @@ class Network(object):
 
         # backbone
         with tf.variable_scope('backbone'):
-            focus_0 = focus(inputs, 64, 3, 'model/0')
-            conv_1 = convBnLeakly(focus_0, 128, 3, 2, "model/1")
-            bottleneck_csp_2 = bottleneckCSP(conv_1, 128, 128, 3, True, 0.5, "model/2")
-            conv_3 = convBnLeakly(bottleneck_csp_2, 256, 3, 2, 'model/3')
-            bottleneck_csp_4 = bottleneckCSP(conv_3, 256, 256, 9, True, 0.5, 'model/4')
-            conv_5 = convBnLeakly(bottleneck_csp_4, 512, 3, 2, 'model/5')
-            bottleneck_csp_6 = bottleneckCSP(conv_5, 512, 512, 9, True, 0.5, 'model/6')
-            conv_7 = convBnLeakly(bottleneck_csp_6, 1024, 3, 2, 'model/7')
-            spp_8 = spp(conv_7, 1024, 1024, 5, 9, 13, 'model/8')
+            x = tf.nn.space_to_depth(inputs, 2)
+            x = conv(x, int(round(self.model_width * 64)), 3)
+            x = conv(x, int(round(self.model_width * 128)), 3, 2)
+            x = csp(x, int(round(self.model_width * 128)), int(round(self.model_depth * 3)))
+
+            x = conv(x, int(round(self.model_width * 256)), 3, 2)
+            x = csp(x, int(round(self.model_width * 256)), int(round(self.model_depth * 9)))
+            x1 = x
+
+            x = conv(x, int(round(self.model_width * 512)), 3, 2)
+            x = csp(x, int(round(self.model_width * 512)), int(round(self.model_depth * 9)))
+            x2 = x
+
+            x = conv(x, int(round(self.model_width * 1024)), 3, 2)
+            spp_net = spp(x, 1024, 5, 9, 13, self.model_width, 'spp')
 
         # neck
         with tf.variable_scope('neck'):
-            bottleneck_csp_9 = bottleneckCSP(spp_8, 1024, 1024, 3, False, 0.5, 'model/9')
-            conv_10 = convBnLeakly(bottleneck_csp_9, 512, 1, 1, 'model/10')
+            x = csp(spp_net, int(round(self.model_width * 1024)), int(round(self.model_depth * 3)), False)
+            x = conv(x, int(round(self.model_width * 512)), 1)
+            x3 = x
 
-            shape = [conv_10.shape[1].value * 2, conv_10.shape[2].value * 2]
-            # 0：双线性差值。1：最近邻居法。2：双三次插值法。3：面积插值法
-            deconv_11 = tf.image.resize_images(conv_10, shape, method=1)
+            x = tf.keras.layers.UpSampling2D()(x)
+            x = tf.keras.layers.concatenate([x, x2])
+            x = csp(x, int(round(self.model_width * 512)), int(round(self.model_depth * 3)), False)
 
-            concat_12 = tf.concat((deconv_11, bottleneck_csp_6), -1)
-            bottleneck_csp_13 = bottleneckCSP(concat_12, 1024, 512, 3, False, 0.5, 'model/13')
-            conv_14 = convBnLeakly(bottleneck_csp_13, 256, 1, 1, 'model/14')
+            x = conv(x, int(round(self.model_width * 256)), 1)
+            x4 = x
 
-            shape = [conv_14.shape[1].value * 2, conv_14.shape[2].value * 2]
-            deconv_15 = tf.image.resize_images(conv_14, shape, method=1)
+            x = tf.keras.layers.UpSampling2D()(x)
+            x = tf.keras.layers.concatenate([x, x1])
+            x = csp(x, int(round(self.model_width * 256)), int(round(self.model_depth * 3)), False)
+            stage_3 = x
 
-            concat_16 = tf.concat((deconv_15, bottleneck_csp_4), -1)
-            bottleneck_csp_17 = bottleneckCSP(concat_16, 512, 256, 3, False, 0.5, 'model/17')
-            conv_18 = convBnLeakly(bottleneck_csp_17, 256, 3, 2, 'model/18')
+            x = conv(x, int(round(self.model_width * 256)), 3, 2)
+            x = tf.keras.layers.concatenate([x, x4])
+            x = csp(x, int(round(self.model_width * 512)), int(round(self.model_depth * 3)), False)
+            stage_4 = x
 
-            concat_19 = tf.concat((conv_18, conv_14), -1)
-            bottleneck_csp_20 = bottleneckCSP(concat_19, 512, 512, 3, False, 0.5, 'model/20')
-            conv_21 = convBnLeakly(bottleneck_csp_20, 512, 3, 2, 'model/21')
-
-            concat_22 = tf.concat((conv_21, conv_10), -1)
-            bottleneck_csp_23 = bottleneckCSP(concat_22, 1024, 1024, 3, False, 0.5, 'model/23')
+            x = conv(x, int(round(self.model_width * 512)), 3, 2)
+            x = tf.keras.layers.concatenate([x, x3])
+            x = csp(x, int(round(self.model_width * 1024)), int(round(self.model_depth * 3)), False)
+            stage_5 = x
 
         # head
         with tf.variable_scope('head'):
-            conv_24_m0 = conv(bottleneck_csp_17, 3 * (self.class_num + 5), 1, 1, 'model/24/m/0', add_bias=True)
-            conv_24_m1 = conv(bottleneck_csp_20, 3 * (self.class_num + 5), 1, 1, 'model/24/m/1', add_bias=True)
-            conv_24_m2 = conv(bottleneck_csp_23, 3 * (self.class_num + 5), 1, 1, 'model/24/m/2', add_bias=True)
+            stage_3 = tf.keras.layers.Conv2D(3 * (self.class_num + 5), 1, name='stage_3', kernel_initializer=initializer, kernel_regularizer=l2)(stage_3)
+            stage_4 = tf.keras.layers.Conv2D(3 * (self.class_num + 5), 1, name='stage_4', kernel_initializer=initializer, kernel_regularizer=l2)(stage_4)
+            stage_5 = tf.keras.layers.Conv2D(3 * (self.class_num + 5), 1, name='stage_5', kernel_initializer=initializer, kernel_regularizer=l2)(stage_5)
 
-        return conv_24_m0, conv_24_m1, conv_24_m2
+        return stage_3, stage_4, stage_5
 
     def calc_loss(self, y_logit, y_true):
         """
@@ -95,18 +104,21 @@ class Network(object):
         :param label_bbox: [label_sbbox, label_mbbox, label_lbbox].
         :return:
         """
-        loss_iou, loss_conf, loss_class = 0., 0., 0.
+        loss_xy, loss_wh, loss_conf, loss_class = 0., 0., 0., 0.
         anchor_group = [self.anchors[6:9], self.anchors[3:6], self.anchors[0:3]]
 
         for i in range(len(y_logit)):
             result = self.loss_layer(y_logit[i], y_true[i], anchor_group[i])
-            loss_iou += result[0]
+            loss_xy += result[0]
+            loss_wh += result[1]
             loss_conf += result[1]
             loss_class += result[2]
-        total_loss = loss_iou + loss_conf + loss_class
-        return [total_loss, loss_iou, loss_conf, loss_class]
+        total_loss = loss_xy + loss_wh + loss_conf + loss_class
+        return [total_loss, loss_xy + loss_wh, loss_conf, loss_class]
 
     def loss_layer(self, logits, y_true, anchors):
+        feature_size = tf.shape(logits)[1:3]
+        ratio = tf.cast(self.input_size / feature_size, tf.float32)
 
         # ground truth
         object_coords = y_true[:, :, :, :, 0:4]
@@ -126,8 +138,21 @@ class Network(object):
 
 
         box_loss_scale = 2. - (1.0 * y_true[..., 2:3] / tf.cast(self.input_width, tf.float32)) * (1.0 * y_true[..., 3:4] / tf.cast(self.input_height, tf.float32))
-        ciou = tf.expand_dims(self.box_ciou(bboxes_xywh, object_coords), axis=-1)
-        iou_loss = object_masks * box_loss_scale * (1 - ciou)
+        true_xy = y_true[..., 0:2] / ratio[::-1] - xy_cell
+        pred_xy = pred_box_xy / ratio[::-1] - xy_cell
+
+        true_tw_th = y_true[..., 2:4] / anchors
+        pred_tw_th = pred_box_wh / anchors
+        true_tw_th = tf.where(condition=tf.equal(true_tw_th, 0), x=tf.ones_like(true_tw_th), y=true_tw_th)
+        pred_tw_th = tf.where(condition=tf.equal(pred_tw_th, 0), x=tf.ones_like(pred_tw_th), y=pred_tw_th)
+        true_tw_th = tf.log(tf.clip_by_value(true_tw_th, 1e-9, 1e9))
+        pred_tw_th = tf.log(tf.clip_by_value(pred_tw_th, 1e-9, 1e9))
+
+        xy_loss = tf.square(true_xy - pred_xy) * object_masks * box_loss_scale
+        wh_loss = tf.square(true_tw_th - pred_tw_th) * object_masks * box_loss_scale
+
+        # ciou = tf.expand_dims(self.box_ciou(bboxes_xywh, object_coords), axis=-1)
+        # iou_loss = object_masks * box_loss_scale * (1 - ciou)
 
         # confidence loss
         iou = self.broadcast_iou(valid_true_box_xy, valid_true_box_wh, pred_box_xy, pred_box_wh)
@@ -151,10 +176,12 @@ class Network(object):
         label_target = (1 - delta) * object_probs + delta * 1. / self.class_num
         class_loss = object_masks * tf.nn.sigmoid_cross_entropy_with_logits(labels=label_target, logits=pred_prob_logits)
 
-        iou_loss = tf.reduce_mean(tf.reduce_sum(iou_loss, axis=[1, 2, 3, 4]))
+        #iou_loss = tf.reduce_mean(tf.reduce_sum(iou_loss, axis=[1, 2, 3, 4]))
+        xy_loss = tf.reduce_mean(tf.reduce_sum(xy_loss, axis=[1, 2, 3, 4]))
+        wh_loss = tf.reduce_mean(tf.reduce_sum(wh_loss, axis=[1, 2, 3, 4]))
         conf_loss = tf.reduce_mean(tf.reduce_sum(conf_loss, axis=[1, 2, 3, 4]))
         class_loss = tf.reduce_mean(tf.reduce_sum(class_loss, axis=[1, 2, 3, 4]))
-        return iou_loss, conf_loss, class_loss
+        return xy_loss, wh_loss, conf_loss, class_loss
 
     def reorg_layer(self, feature_maps, anchors):
         """
