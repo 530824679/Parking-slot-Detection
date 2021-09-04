@@ -72,7 +72,7 @@ def write_txt(root_path):
             json_file.write(text + '\n')
 
 if __name__ == '__main__':
-    # write_txt("/home/chenwei/HDD/Project/Parking-slot-Detection/datasets/voc_bosh_clyinder")
+    #write_txt("/home/chenwei/HDD/Project/Parking-slot-Detection/datasets/voc")
 
-    path = '/home/chenwei/HDD/Project/Parking-slot-Detection/datasets/voc_bosh_clyinder'
+    path = '/home/chenwei/HDD/Project/Parking-slot-Detection/datasets/voc'
     show_and_save(path)

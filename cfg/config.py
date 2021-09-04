@@ -12,14 +12,14 @@
 import os
 
 path_params = {
-    'data_path': "/home/chenwei/HDD/Project/Parking-slot-Detection/datasets/voc_bosh_clyinder",
-    'class_file': '/home/chenwei/HDD/Project/Parking-slot-Detection/data/classes.txt',
+    'data_path': "/home/chenwei/HDD/Project/Parking-slot-Detection/datasets/voc",
+    'class_file': '../data/classes.txt',
     'train_file': '/home/chenwei/HDD/Project/Parking-slot-Detection/data/train.txt',
     'anchor_file': '/home/chenwei/HDD/Project/Parking-slot-Detection/data/anchors.txt',
     'tfrecord_dir': '/home/chenwei/HDD/Project/Parking-slot-Detection/tfrecords',
     'logs_dir': './logs',
-    'checkpoint_name': 'Fisheye_OD',
-    'checkpoints_dir': './checkpoints',
+    'ckpt_name': 'Fisheye_OD',
+    'ckpt_dir': './checkpoints',
     'initial_weight': './weight/model.ckpt'
 }
 
@@ -32,12 +32,12 @@ data_params = {
 }
 
 model_params = {
-    'input_height': 640,
-    'input_width': 640,
+    'input_height': 416,
+    'input_width': 416,
     'channel': 3,
     'classes': 3,
-    'depth': 1.0,       # [0.33, 0.67, 1.0, 1.33]
-    'width': 1.0,       # [0.50, 0.75, 1.0, 1.25]
+    'depth': 0.33,       # [0.33, 0.67, 1.0, 1.33]
+    'width': 0.50,       # [0.50, 0.75, 1.0, 1.25]
     'strides': [8, 16, 32],
     'anchor_per_scale': 3,
     'label_smoothing': 0.01,
@@ -47,11 +47,12 @@ model_params = {
 }
 
 solver_params = {
-    'total_epoches': 8000,
-    'batch_size': 4,
-    'warmup_epoches': 10,
-    'learning_rate': 0.001,
-    'decay_steps': 500,            # 衰变步数
+    'total_epoches': 200,
+    'batch_size': 8,
+    'init_learning_rate': 3e-4,
+    'warmup_learning_rate': 1e-6,
+    'warmup_epoches': 2,
+    'decay_steps': 500,             # 衰变步数
     'decay_rate': 0.95,             # 衰变率
     'momentum': 0.9,
     'weight_decay': 0.0005,

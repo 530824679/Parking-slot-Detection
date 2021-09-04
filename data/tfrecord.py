@@ -67,7 +67,7 @@ class TFRecord(object):
                 if len(boxes) == 0:
                     continue
 
-                while len(boxes) < 300:
+                while len(boxes) < 150:
                     boxes = np.append(boxes, [[0.0, 0.0, 0.0, 0.0, 0.0]], axis=0)
 
                 boxes = np.array(boxes, dtype=np.float32)
@@ -106,7 +106,7 @@ class TFRecord(object):
 
         # 转换为网络输入所要求的形状
         tf_image = tf.reshape(tf_image, [tf_height, tf_width, 3])
-        tf_label = tf.reshape(tf_bbox, [300, 5])
+        tf_label = tf.reshape(tf_bbox, [150, 5])
 
         # preprocess
         tf_image, y_true_40, y_true_80, y_true_160 = tf.py_func(self.dataset.preprocess_data, inp=[tf_image, tf_label, self.input_height, self.input_width], Tout=[tf.float32, tf.float32, tf.float32, tf.float32])

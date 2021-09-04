@@ -55,6 +55,16 @@ def compute_curr_epoch(global_step, batch_size, image_num):
     epoch = global_step * batch_size / image_num
     return tf.cast(epoch, tf.int32)
 
+def check_directory():
+    ckpt_path = path_params['ckpt_dir']
+    if not os.path.exists(ckpt_path):
+        os.makedirs(ckpt_path)
+
+    logs_path = path_params['logs_dir']
+    if os.path.exists(logs_path):
+        shutil.rmtree(logs_path)
+    os.makedirs(logs_path)
+
 def train():
     start_step = 0
     input_height = model_params['input_height']
@@ -69,15 +79,8 @@ def train():
     classes = read_class_names(path_params['class_file'])
     class_num = len(classes)
 
-    # 创建相关目录
-    ckpt_path = path_params['checkpoints_dir']
-    if not os.path.exists(ckpt_path):
-        os.makedirs(ckpt_path)
-
-    logs_path = path_params['logs_dir']
-    if os.path.exists(logs_path):
-        shutil.rmtree(logs_path)
-    os.makedirs(logs_path)
+    # 检查文件夹是否存在
+    check_directory()
 
     # 配置GPU资源
     gpu_options = tf.ConfigProto(allow_soft_placement=True)
@@ -89,16 +92,16 @@ def train():
     train_tfrecord = os.path.join(tfrecord_dir, "train.tfrecord")
     data_num = total_sample(train_tfrecord)
     batch_num = int(math.ceil(float(data_num) / batch_size))
-    dataset = data.create_dataset(train_tfrecord, batch_num, batch_size=batch_size, is_shuffle=False)
+    dataset = data.create_dataset(train_tfrecord, batch_num, batch_size=batch_size, is_shuffle=True)
 
     # 创建训练和验证数据迭代器
     iterator = dataset.make_one_shot_iterator()
     inputs, y_true_1, y_true_2, y_true_3 = iterator.get_next()
 
     inputs.set_shape([None, input_height, input_width, 3])
-    y_true_1.set_shape([None, 20, 20, 3, 5 + class_num])
-    y_true_2.set_shape([None, 40, 40, 3, 5 + class_num])
-    y_true_3.set_shape([None, 80, 80, 3, 5 + class_num])
+    y_true_1.set_shape([None, 13, 13, 3, 5 + class_num])
+    y_true_2.set_shape([None, 26, 26, 3, 5 + class_num])
+    y_true_3.set_shape([None, 52, 52, 3, 5 + class_num])
     y_true = [y_true_1, y_true_2, y_true_3]
 
     # 构建网络计算损失
@@ -107,22 +110,23 @@ def train():
         logits = model.forward(inputs)
 
     # 计算损失
-    loss_op = model.calc_loss(logits, y_true)
-    l2_loss = tf.losses.get_regularization_loss()
-    total_loss = loss_op[0] + loss_op[1] + loss_op[2] + loss_op[3] + l2_loss
+    total_loss, iou_loss, conf_loss, class_loss = model.calc_loss(logits, y_true)
+    #l2_loss = tf.losses.get_regularization_loss()
+    #total_loss = loss_op[0] + loss_op[1] + loss_op[2]# + l2_loss
 
     # define training op
     global_step = tf.Variable(float(0), dtype=tf.float64, trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
-    learning_rate = config_cosine_lr(batch_num, batch_size, num_epochs, 'learning_lr')
+    learning_rate = tf.train.exponential_decay(solver_params['learning_rate'], global_step, solver_params['decay_steps'], solver_params['decay_rate'], staircase=True)
+    #learning_rate = config_cosine_lr(batch_num, batch_size, num_epochs, 'learning_lr')
     #optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=0.937)
     optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=0.99)
 
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     with tf.control_dependencies(update_ops):
-        #train_op = optimizer.minimize(total_loss, global_step=global_step)
-        gvs = optimizer.compute_gradients(total_loss)
-        clip_grad_var = [gv if gv[0] is None else [tf.clip_by_norm(gv[0], 5.), gv[1]] for gv in gvs]
-        train_op = optimizer.apply_gradients(clip_grad_var, global_step=global_step)
+        train_op = optimizer.minimize(total_loss, global_step=global_step)
+        # gvs = optimizer.compute_gradients(total_loss)
+        # clip_grad_var = [gv if gv[0] is None else [tf.clip_by_norm(gv[0], 5.), gv[1]] for gv in gvs]
+        # train_op = optimizer.apply_gradients(clip_grad_var, global_step=global_step)
 
     # 模型保存
     loader = tf.train.Saver()#tf.moving_average_variables())
@@ -131,10 +135,9 @@ def train():
 
     # 配置tensorboard
     tf.summary.scalar('learn_rate', learning_rate)
-    tf.summary.scalar("xy_loss", loss_op[0])
-    tf.summary.scalar("wh_loss", loss_op[1])
-    tf.summary.scalar("conf_loss", loss_op[2])
-    tf.summary.scalar("class_loss", loss_op[3])
+    tf.summary.scalar("iou_loss", iou_loss)
+    tf.summary.scalar("conf_loss", conf_loss)
+    tf.summary.scalar("class_loss", class_loss)
     tf.summary.scalar('total_loss', total_loss)
 
     summary_op = tf.summary.merge_all()
@@ -166,21 +169,20 @@ def train():
 
         print('\n----------- start to train -----------\n')
         for epoch in range(start_step + 1, num_epochs):
-            train_epoch_loss, train_epoch_xy_loss, train_epoch_wh_loss, train_epoch_confs_loss, train_epoch_class_loss = [], [], [], [], []
+            train_epoch_loss, train_epoch_iou_loss, train_epoch_confs_loss, train_epoch_class_loss = [], [], [], []
             for index in tqdm(range(batch_num)):
-                _, summary_, loss_, xy_loss_, wh_loss_, confs_loss_, class_loss_, global_step_, lr = sess.run(
-                    [train_op, summary_op, total_loss, loss_op[0], loss_op[1], loss_op[2], loss_op[3], global_step, learning_rate])
+                _, summary_, loss_, iou_loss_, confs_loss_, class_loss_, global_step_, lr = sess.run(
+                    [train_op, summary_op, total_loss, iou_loss, conf_loss, class_loss, global_step, learning_rate])
 
                 train_epoch_loss.append(loss_)
-                train_epoch_xy_loss.append(xy_loss_)
-                train_epoch_wh_loss.append(wh_loss_)
+                train_epoch_iou_loss.append(iou_loss_)
                 train_epoch_confs_loss.append(confs_loss_)
                 train_epoch_class_loss.append(class_loss_)
 
                 summary_writer.add_summary(summary_, global_step_)
 
-            train_epoch_loss, train_epoch_xy_loss, train_epoch_wh_loss, train_epoch_confs_loss, train_epoch_class_loss = np.mean(train_epoch_loss), np.mean(train_epoch_xy_loss), np.mean(train_epoch_wh_loss), np.mean(train_epoch_confs_loss), np.mean(train_epoch_class_loss)
-            print("Epoch: {}, global_step: {}, lr: {:.8f}, total_loss: {:.3f}, xy_loss: {:.3f}, wh_loss: {:.3f}, confs_loss: {:.3f}, class_loss: {:.3f}".format(epoch, global_step_, lr, train_epoch_loss, train_epoch_xy_loss, train_epoch_wh_loss, train_epoch_confs_loss, train_epoch_class_loss))
+            train_epoch_loss, train_epoch_iou_loss, train_epoch_confs_loss, train_epoch_class_loss = np.mean(train_epoch_loss), np.mean(train_epoch_iou_loss), np.mean(train_epoch_confs_loss), np.mean(train_epoch_class_loss)
+            print("Epoch: {}, global_step: {}, lr: {:.8f}, total_loss: {:.3f}, iou_loss: {:.3f}, confs_loss: {:.3f}, class_loss: {:.3f}".format(epoch, global_step_, lr, train_epoch_loss, train_epoch_iou_loss, train_epoch_confs_loss, train_epoch_class_loss))
             snapshot_model_name = 'odet_train_mloss={:.4f}.ckpt'.format(train_epoch_loss)
             saver.save(sess, os.path.join(checkpoint_dir, snapshot_model_name), global_step=epoch)
 

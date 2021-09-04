@@ -32,7 +32,7 @@ class Dataset(object):
         self.class_num = len(self.classes)
 
     def load_image(self, image_num):
-        image_path = os.path.join(self.data_path, 'JPEGImages', image_num + '.png')
+        image_path = os.path.join(self.data_path, 'JPEGImages', image_num + '.jpg')
 
         if os.path.exists(image_path):
             image = cv2.imread(image_path)
