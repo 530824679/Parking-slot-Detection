@@ -28,7 +28,7 @@ sys.path.append('./')
 logger = logging.getLogger(__name__)
 
 class Network(object):
-    def __init__(self, cfg='odet.yaml', ch=3, nc=None, anchors=None):
+    def __init__(self, cfg='odet.yaml', ch=3, num_classes=None, anchors=None):
         if isinstance(cfg, dict):
             self.yaml = cfg
         else:
@@ -37,16 +37,16 @@ class Network(object):
                 self.yaml = yaml.load(f, Loader=yaml.SafeLoader)
 
         ch = self.yaml['ch'] = self.yaml.get('ch', ch)
-        if nc and nc != self.yaml['nc']:
-            logger.info(f"Overriding model.yaml nc={self.yaml['nc']} with nc={nc}")
-            self.yaml['nc'] = nc
+        if num_classes and num_classes != self.yaml['num_classes']:
+            logger.info(f"Overriding model.yaml num_classes={self.yaml['num_classes']} with num_classes={num_classes}")
+            self.yaml['num_classes'] = num_classes
 
         if anchors:
             logger.info(f'Overriding model.yaml anchors with anchors={anchors}')
             self.yaml['anchors'] = round(anchors)
 
         self.module_list, self.save = self.parse_model(deepcopy(self.yaml), ch=[ch])
-        self.names_list = [str(i) for i in range(self.yaml['nc'])]
+        self.names_list = [str(i) for i in range(self.yaml['num_classes'])]
 
         # Build strides, anchors
         module = self.module_list[-1]
@@ -73,9 +73,9 @@ class Network(object):
 
     def parse_model(self, d, ch):
         logger.info('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
-        anchors, nc, depth_multiple, width_multiple = d['anchors'], d['nc'], d['depth_multiple'], d['width_multiple']
+        anchors, num_classes, depth_multiple, width_multiple = d['anchors'], d['num_classes'], d['depth_multiple'], d['width_multiple']
         num_anchors = (len(anchors[0]) // 2) if isinstance(anchors, list) else anchors
-        output_dims = num_anchors * (nc + 5)
+        output_dims = num_anchors * (num_classes + 5)
 
         # layers, savelist, ch out
         layers, save, c2 = [], [], ch[-1]

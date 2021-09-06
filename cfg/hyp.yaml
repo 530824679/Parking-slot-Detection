@@ -1,0 +1,26 @@
+# Train Hyperparameter
+lr0: 0.00447          # 学习率
+lrf: 0.114            # 余弦退火超参数
+momentum: 0.873       # 学习率动量
+weight_decay: 0.00047 # 权重衰减系数
+giou: 0.0306          # giou损失的系数
+cls: 0.211            # 分类损失的系数
+cls_pw: 0.546         # 分类BCELoss中正样本的权重
+obj: 0.421            # 有无物体损失的系数
+obj_pw: 0.972         # 有无物体BCELoss中正样本的权重
+iou_t: 0.2            # 标签与anchors的iou阈值iou training threshold
+anchor_t: 2.26        # 标签的长h宽w/anchor的长h_a宽w_a阈值, 即h/h_a, w/w_a都要在(1/2.26, 2.26)之间anchor-multiple threshold
+fl_gamma: 0.0         # 设为0则表示不使用focal loss(efficientDet default is gamma=1.5)
+
+# Data Augmentation
+hsv_h: 0.0154         # 色调
+hsv_s: 0.9            # 饱和度
+hsv_v: 0.619          # 明度
+degrees: 0.404        # 旋转角度
+translate: 0.206　    # 水平和垂直平移
+scale: 0.86　         # 缩放
+shear: 0.795          # 剪切
+perspective: 0.0      # 透视变换参数
+flipud: 0.00756       # 上下翻转
+fliplr: 0.5           # 左右翻转
+mixup: 0.153          # mixup系数
