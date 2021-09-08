@@ -11,14 +11,10 @@ ros_path = '/opt/ros/kinetic/lib/python2.7/dist-packages'
 if ros_path in sys.path:
     sys.path.remove(ros_path)
 
-import os
-import cv2
-import time
 import numpy as np
-import glog as log
 import tensorflow as tf
 from cfg.config import *
-from utils.visualization import *
+from visualize.visualization import *
 
 def load_image(image_path):
     image = cv2.imdecode(np.fromfile(image_path, np.uint8), -1)[:, :, :3]

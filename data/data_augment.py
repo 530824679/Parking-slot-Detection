@@ -3,7 +3,7 @@
 # @Time    : 2020/11/01
 # @Author  : Oscar Chen
 # @Email   : 530824679@qq.com
-# @File    : augmentation.py
+# @File    : data_augment.py
 # Description : data augmentation
 # --------------------------------------
 import cv2
@@ -70,34 +70,27 @@ def random_expand(image, bboxes, max_ratio=3, fill=0, keep_ratio=True):
 
     return dst, bboxes
 
-def letterbox_resize(image, bboxes, new_height, new_width, interp=0):
-    """
-    Resize the image and correct the bbox accordingly.
-    :param image: BGR image data shape is [height, width, channel]
-    :param bboxes: bounding box shape is [num, 4]
-    :param new_height: new image height
-    :param new_width: new image width
-    :param interp:
-    :return: result
-    """
-    origin_height, origin_width = image.shape[:2]
-    resize_ratio = min(new_width / origin_width, new_height / origin_height)
-    resize_width = int(resize_ratio * origin_width)
-    resize_height = int(resize_ratio * origin_height)
+def letterbox_resize(image, target_sizes, interp=0, label=None):
+    if not isinstance(target_sizes, (list, set, tuple)):
+        target_sizes = [target_sizes, target_sizes]
+    target_h, target_w = target_sizes
 
-    image = cv2.resize(image, (resize_width, resize_height), interpolation=interp)
-    image_padded = np.full((new_height, new_width, 3), 128, np.uint8)
+    h, w, _ = image.shape
+    scale = min(target_h / h, target_w / w)
+    temp_h, temp_w = int(scale * h), int(scale * w)
 
-    dw = int((new_width - resize_width) / 2)
-    dh = int((new_height - resize_height) / 2)
+    image_resize = cv2.resize(image, (temp_w, temp_h), interpolation=interp)
+    image_padded = np.full(shape=(target_h, target_w, 3), fill_value=128.0)
 
-    image_padded[dh:resize_height + dh, dw:resize_width + dw, :] = image
+    delta_h, delta_w = (target_h - temp_h) // 2, (target_w - temp_w) // 2
+    image_padded[delta_h: delta_h + temp_h, delta_w: delta_w + temp_w, :] = image_resize
 
-    # xmin, xmax, ymin, ymax
-    bboxes[:, [0, 2]] = bboxes[:, [0, 2]] * resize_ratio + dw
-    bboxes[:, [1, 3]] = bboxes[:, [1, 3]] * resize_ratio + dh
-
-    return image_padded, bboxes
+    if label is not None:
+        label[:, [0, 2]] = (label[:, [0, 2]] * scale * w + delta_w) / target_w
+        label[:, [1, 3]] = (label[:, [1, 3]] * scale * h + delta_h) / target_h
+        return image_padded, label
+    else:
+        return image_padded
 
 def random_color_distort(image, brightness=32, hue=18, saturation=0.5, value=0.5):
     """

@@ -20,7 +20,7 @@ from xml.etree import ElementTree as ET
 from cfg.config import *
 from utils.process_utils import *
 from utils.data_utils import *
-from data.augmentation import *
+from data.data_augment import *
 
 class Dataset(object):
     def __init__(self):

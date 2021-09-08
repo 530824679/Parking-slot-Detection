@@ -61,3 +61,14 @@ def increment_dir(dir, comment=''):
     if len(d):
         n = max([int(x[len(dir):x.find('_') if '_' in x else None]) for x in d]) + 1  # increment
     return dir + str(n) + ('_' + comment if comment else '')
+
+# Returns x evenly divisible by divisor
+def make_divisible(x, divisor):
+    return math.ceil(x / divisor) * divisor
+
+# Verify img_size is a multiple of stride s
+def check_img_size(img_size, s=32):
+    new_size = make_divisible(img_size, int(s))  # ceil gs-multiple
+    if new_size != img_size:
+        print('WARNING: --img-size %g must be multiple of max stride %g, updating to %g' % (img_size, s, new_size))
+    return new_size

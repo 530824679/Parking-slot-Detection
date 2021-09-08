@@ -18,8 +18,11 @@ import tensorflow as tf
 import glog as log
 from pathlib import Path
 
-from utils.general import get_latest_run, check_file, increment_dir, colorstr
+from utils.general import get_latest_run, check_file, increment_dir, colorstr, check_img_size
 from model.network import Network
+from loss.optimiter import Optimizer
+from data.data_loader import DataReader, DataLoader
+
 
 from cfg.config import path_params, model_params, solver_params
 from data import dataset, tfrecord
@@ -63,17 +66,9 @@ def compute_curr_epoch(global_step, batch_size, image_num):
     epoch = global_step * batch_size / image_num
     return tf.cast(epoch, tf.int32)
 
-def check_directory():
-    ckpt_path = path_params['ckpt_dir']
-    if not os.path.exists(ckpt_path):
-        os.makedirs(ckpt_path)
 
-    logs_path = path_params['logs_dir']
-    if os.path.exists(logs_path):
-        shutil.rmtree(logs_path)
-    os.makedirs(logs_path)
 
-def train(hyp, opt):
+def train(hyp, opt, tb_writer):
     logger.info(colorstr('hyperparameters: ') + ', '.join(f'{k}={v}' for k, v in hyp.items()))
     log_dir = Path(opt.log_dir)
 
@@ -118,44 +113,70 @@ def train(hyp, opt):
 
     # Create model
     model = Network(opt.config, ch=3, num_classes=num_classes, anchors=hyp.get('anchors'))
-
-
-
+    anchors = model.module_list[-1].anchors
+    stride = model.module_list[-1].stride
+    num_classes = model.module_list[-1].num_classes
 
 
 
     # Freeze
-    freeze = []  # parameter names to freeze (full or partial)
-    for k, v in model.named_parameters():
-        v.requires_grad = True  # train all layers
-        if any(x in k for x in freeze):
-            print('freezing %s' % k)
-            v.requires_grad = False
+    # restore_include = None
+    # restore_exclude = ['yolov3/yolov3_head/Conv_14', 'yolov3/yolov3_head/Conv_6', 'yolov3/yolov3_head/Conv_22']
+    # update_part = ['yolov3/yolov3_head']
+    # saver_to_restore = tf.train.Saver(var_list=tf.contrib.framework.get_variables_to_restore(include=restore_include, exclude=restore_exclude))
+    # update_vars = tf.contrib.framework.get_variables_to_restore(include=update_part)
+
+    # global_step = tf.Variable(float(0), trainable=False, collections=[tf.GraphKeys.LOCAL_VARIABLES])
+    # lr_tmp = tf.train.exponential_decay(solver_params['lr'], global_step - batch_num * model_params['warm_up_epoch'], solver_params['decay_steps'], solver_params['decay_rate'], staircase=True)
+    # learning_rate = tf.cond(tf.less(global_step, batch_num * model_params['warm_up_epoch']),
+    #                         lambda: solver_params['lr'] * global_step / (batch_num * model_params['warm_up_epoch']),
+    #                         lambda: tf.maximum(lr_tmp, 1e-6))
+
 
     # Optimizer
-    nbs = 64  # nominal batch size
-    accumulate = max(round(nbs / batch_size), 1)  # accumulate loss before optimizing
-    hyp['weight_decay'] *= batch_size * accumulate / nbs  # scale weight_decay
-    logger.info(f"Scaled weight_decay = {hyp['weight_decay']}")
+    optimizer = Optimizer('adam')()
 
-    pg0, pg1, pg2 = [], [], []  # optimizer parameter groups
-    for k, v in model.named_modules():
-        if hasattr(v, 'bias') and isinstance(v.bias, nn.Parameter):
-            pg2.append(v.bias)  # biases
-        if isinstance(v, nn.BatchNorm2d):
-            pg0.append(v.weight)  # no decay
-        elif hasattr(v, 'weight') and isinstance(v.weight, nn.Parameter):
-            pg1.append(v.weight)  # apply decay
 
-    optimizer = optim.SGD(pg0, lr=hyp['lr0'], momentum=hyp['momentum'], nesterov=True)
 
-    optimizer.add_param_group({'params': pg1, 'weight_decay': hyp['weight_decay']})  # add pg1 with weight_decay
-    optimizer.add_param_group({'params': pg2})  # add pg2 (biases)
-    logger.info('Optimizer groups: %g .bias, %g conv.weight, %g other' % (len(pg2), len(pg1), len(pg0)))
-    del pg0, pg1, pg2
 
+
+    # cosine 1->hyp['lrf']
     lf = one_cycle(1, hyp['lrf'], epochs)  # cosine 1->hyp['lrf']
-    scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
+
+
+
+    # Resume
+    # best_fitness是以[0.0, 0.0, 0.1, 0.9]为系数并乘以[精确度, 召回率, mAP@0.5, mAP@0.5:0.95]再求和所得
+    start_epoch, best_fitness = 0, 0.0
+    if opt.resume:
+        start_epoch = ckpt['epoch'] + 1
+        assert start_epoch > 0, '%s training to %g epochs is finished, nothing to resume.' % (weights, epochs)
+        shutil.copytree(wdir, wdir.parent / f'weights_backup_epoch{start_epoch - 1}')  # save previous weights
+
+        if epochs < start_epoch:
+            logger.info('%s has been trained for %g epochs. Fine-tuning for %g additional epochs.' % (
+            weights, ckpt['epoch'], epochs))
+            epochs += ckpt['epoch']  # finetune additional epochs
+
+
+
+    # verify imgsz are gs-multiples
+    grid_size = 32
+    imgsz, imgsz_test = [check_img_size(x, grid_size) for x in opt.image_size]
+
+
+
+    # Trainloader
+    reader = DataReader(train_path, img_size=opt.image_size)
+    loader = DataLoader(reader,
+                        anchors,
+                        stride,
+                        opt.image_size,
+                        params['anchor_assign_method'],
+                        params['anchor_positive_augment'])
+
+
+    # testloader
 
 
 
@@ -164,8 +185,41 @@ def train(hyp, opt):
 
 
 
-    # 检查文件夹是否存在
-    check_directory()
+
+
+
+    # Model parameters
+    hyp['box'] *= 3. / nl  # scale to layers
+    hyp['cls'] *= nc / 80. * 3. / nl  # scale to classes and layers
+    hyp['obj'] *= (imgsz / 640) ** 2 * 3. / nl  # scale to image size and layers
+    hyp['label_smoothing'] = opt.label_smoothing
+    model.nc = nc  # attach number of classes to model
+    model.hyp = hyp  # attach hyperparameters to model
+    model.gr = 1.0  # iou loss ratio (obj_loss = 1.0 or iou)
+    model.class_weights = labels_to_class_weights(dataset.labels, nc).to(device) * nc  # attach class weights
+    model.names = names
+
+    # Start training
+    t0 = time.time()
+    nw = max(round(hyp['warmup_epochs'] * nb), 1000)  # number of warmup iterations, max(3 epochs, 1k iterations)
+    # nw = min(nw, (epochs - start_epoch) / 2 * nb)  # limit warmup to < 1/2 of training
+    maps = np.zeros(nc)  # mAP per class
+    results = (0, 0, 0, 0, 0, 0, 0)  # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
+    scheduler.last_epoch = start_epoch - 1  # do not move
+    scaler = amp.GradScaler(enabled=cuda)
+    compute_loss = ComputeLoss(model)  # init loss class
+    logger.info(f'Image sizes {imgsz} train, {imgsz_test} test\n'
+                f'Using {dataloader.num_workers} dataloader workers\n'
+                f'Logging results to {log_dir}\n'
+                f'Starting training for {epochs} epochs...')
+
+
+
+
+
+
+
+
 
     # 解析得到训练样本以及标注
     data = tfrecord.TFRecord()
@@ -316,8 +370,8 @@ if __name__ == '__main__':
     logger.info('Start Tensorboard with "tensorboard --logdir %s", view at http://localhost:6006/' % opt.logdir)
 
     # Tensorboard
-    #tb_writer = None
-    #tb_writer = SummaryWriter(log_dir=log_dir)
+    tb_writer = None
+    tb_writer = tf.summary.create_file_writer(log_dir=log_dir)
 
     # Train
-    train(hyp, opt)
+    train(hyp, opt, tb_writer)

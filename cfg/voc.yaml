@@ -1,0 +1,8 @@
+train: /home/chenwei/HDD/Project/3DVD/datasets/train.txt
+val: /home/chenwei/HDD/Project/3DVD/datasets/val.txt
+
+# number of classes
+nc: 3
+
+# class names
+names: ['car', 'slot', 'corner']

@@ -3,6 +3,7 @@ import time
 import math
 import platform
 import logging
+import numpy as np
 import tensorflow as tf
 
 from copy import deepcopy
@@ -36,3 +37,19 @@ def select_device(device='', batch_size=None):
 
     logger.info(s.encode().decode('ascii', 'ignore') if platform.system() == 'Windows' else s)  # emoji-safe
     return tf.device('cuda:0' if cuda else 'cpu')
+
+def xyxy2xywh(box):
+    y0 = (box[:, 0: 1] + box[:, 2: 3]) / 2.  # x center
+    y1 = (box[:, 1: 2] + box[:, 3: 4]) / 2.  # y center
+    y2 = box[:, 2: 3] - box[:, 0: 1]  # width
+    y3 = box[:, 3: 4] - box[:, 1: 2]  # height
+    y = tf.concat([y0, y1, y2, y3], axis=-1) if isinstance(box, tf.Tensor) else np.concatenate([y0, y1, y2, y3], axis=-1)
+    return y
+
+def xywh2xyxy(box):
+    y0 = box[..., 0: 1] - box[..., 2: 3] / 2  # top left x
+    y1 = box[..., 1: 2] - box[..., 3: 4] / 2  # top left y
+    y2 = box[..., 0: 1] + box[..., 2: 3] / 2  # bottom right x
+    y3 = box[..., 1: 2] + box[..., 3: 4] / 2  # bottom right y
+    y = tf.concat([y0, y1, y2, y3], axis=-1) if isinstance(box, tf.Tensor) else np.concatenate([y0, y1, y2, y3], axis=-1)
+    return y
